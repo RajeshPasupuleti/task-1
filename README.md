@@ -1,67 +1,70 @@
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
 import matplotlib.pyplot as plt
+import yfinance as yf
+import tensorflow as tf
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+from tensorflow.keras.models import Sequential#imported keras within tensorflow 
+from tensorflow.keras.layers import LSTM, Dense#-----------//----------------
+from tensorflow.keras.optimizers import Adam#------------//----------
 
-# Function to get historical stock data
-def get_stock_data(ticker, start_date, end_date):
-    data = yf.download(ticker, start=start_date, end=end_date)
-    return data['Close'].values.reshape(-1, 1), data.index
+# Fetch historical stock price data from Yahoo Finance
+company_symbol = "MCD"  # Replace with the symbol of the company you want to predict
+start_date = "2010-01-01"
+end_date = "2021-01-01"
+df = yf.download(company_symbol, start=start_date, end=end_date)
 
-# Function to prepare data for LSTM model
-def prepare_data(data, sequence_length):
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
-    sequences, labels = [], []
-    for i in range(len(scaled_data) - sequence_length):
-        sequences.append(scaled_data[i:i + sequence_length])
-        labels.append(scaled_data[i + sequence_length])
-    return np.array(sequences), np.array(labels), scaler
+# Preprocess the data
+data = df['Close'].values.reshape(-1, 1)
+scaler = MinMaxScaler()
+data = scaler.fit_transform(data)
 
-# Define LSTM model
-def create_lstm_model(sequence_length):
-    model = Sequential()
-    model.add(LSTM(units=50, return_sequences=True, input_shape=(sequence_length, 1)))
-    model.add(LSTM(units=50))
-    model.add(Dense(units=1))
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
+# Split the data into training and testing sets
+train_size = int(len(data) * 0.8)
+train_data, test_data = data[:train_size], data[train_size:]
 
-# Main function
-def main():
-    # Parameters
-    ticker_symbol = "AAPL"  # Example: Apple Inc. stock
-    start_date = "2022-01-01"
-    end_date = "2023-01-01"
-    sequence_length = 10
+# Create sequences for training and testing
+def create_sequences(data, seq_length):
+    sequences = []
+    targets = []
+    for i in range(len(data) - seq_length):
+        sequence = data[i:i + seq_length]
+        target = data[i + seq_length]
+        sequences.append(sequence)
+        targets.append(target)
+    return np.array(sequences), np.array(targets)#converted the array 
 
-    # Get stock data and prepare for LSTM model
-    stock_data, dates = get_stock_data(ticker_symbol, start_date, end_date)
-    sequences, labels, scaler = prepare_data(stock_data, sequence_length)
+seq_length = 10  # You can adjust this sequence length
+X_train, y_train = create_sequences(train_data, seq_length)
+X_test, y_test = create_sequences(test_data, seq_length)
 
-    # Split data into training and testing sets
-    train_size = int(0.67 * len(stock_data))
-    X_train, X_test, y_train, y_test = sequences[:train_size], sequences[train_size:], labels[:train_size], labels[train_size:]
+# Build the LSTM model
+model = Sequential()
+model.add(LSTM(50, activation='relu', input_shape=(seq_length, 1)))
+model.add(Dense(1))
+model.compile(optimizer='adam', loss='mean_squared_error')
 
-    # Create and train LSTM model
-    model = create_lstm_model(sequence_length)
-    model.fit(X_train, y_train, epochs=100, batch_size=32)
+# Train the model
+model.fit(X_train, y_train, epochs=50, batch_size=32)
 
-    # Make predictions
-    predicted_stock_prices = model.predict(X_test)
-    predicted_stock_prices = scaler.inverse_transform(predicted_stock_prices)
+# Make predictions
+predicted_prices = model.predict(X_test)
 
-    # Plot the results
-    plt.figure(figsize=(14, 7))
-    plt.plot(dates[train_size + sequence_length:], predicted_stock_prices, label='Predicted Stock Prices', color='red')
-    plt.plot(dates[train_size + sequence_length:], scaler.inverse_transform(y_test), label='Actual Stock Prices', color='blue')
-    plt.title('Stock Price Prediction using LSTM')
-    print("Predicted Stock Prices:")
-    print(predicted_stock_prices)
-    plt.xlabel('Date')
-    plt.ylabel('Stock Price')
-    plt.legend()
-    plt.show() 
+# Inverse transform the predictions and actual prices to their original scale
+predicted_prices = scaler.inverse_transform(predicted_prices)
+y_test = scaler.inverse_transform(y_test)
+
+# Calculate Mean Squared Error
+mse = mean_squared_error(y_test, predicted_prices)
+print("Mean Squared Error:", mse)
+
+# Visualize the results
+plt.figure(figsize=(12, 6))
+plt.plot(df.index[train_size+seq_length:], y_test, label='True Prices', color='blue')
+plt.plot(df.index[train_size+seq_length:], predicted_prices, label='Predicted Prices', color='red')
+plt.xlabel('Date')
+plt.ylabel('Stock Price')
+plt.title(f'{company_symbol} Stock Price Prediction')
+plt.legend()
+plt.show()
